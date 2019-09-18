@@ -494,8 +494,8 @@ func (p *IBMS3fsProvisioner) Delete(pv *v1.PersistentVolume) error {
 }
 
 func (p *IBMS3fsProvisioner) deleteBucket(pvcAnnots *pvcAnnotations, endpointValue, regionValue, iamEndpoint string) error {
-	if pvAnnots.ServiceName != "" {
-		crtFile := path.Join(caBundlePath, pvAnnots.ServiceName)
+	if pvcAnnots.ServiceName != "" {
+		crtFile := path.Join(caBundlePath, pvcAnnots.ServiceName)
                 os.Setenv("AWS_CA_BUNDLE", crtFile)
 	}
 	creds, err := p.getCredentials(pvcAnnots.SecretName, pvcAnnots.SecretNamespace)
