@@ -19,6 +19,7 @@ import (
 	"github.com/IBM/ibmcloud-object-storage-plugin/utils/parser"
 	"go.uber.org/zap"
 	"io/ioutil"
+	"net/url"
 	"os"
 	"os/exec"
 	"path"
@@ -32,7 +33,9 @@ const (
 	passwordFileName      = "passwd"
 	cacheDirectoryName    = "cache"
 	defaultTLSCipherSuite = "AES"
-
+	caFileName            = "cabundle.crt"
+	caPath                = "/tmp"
+	etcHost               = "/etc/hosts"
 	// SecretAccessKey is the key name for the AWS Access Key
 	SecretAccessKey = "access-key"
 	// SecretSecretKey is the key name for the AWS Secret Key
@@ -43,6 +46,8 @@ const (
 	SecretServiceInstanceID = "service-instance-id"
 	// defaultIAMEndPoint is the default URL of the IBM IAM endpoint
 	defaultIAMEndPoint = "https://iam.bluemix.net"
+	// CrtBundle is the base64 encoded crt bundle
+	CrtBundle = "ca-bundle-crt"
 )
 
 var (
@@ -88,6 +93,8 @@ type Options struct {
 	UseXattr                bool   `json:"use-xattr,string,omitempty"`
 	AccessMode              string `json:"access-mode,omitempty"`
 	ServiceInstanceIDB64    string `json:"kubernetes.io/secret/service-instance-id,omitempty"`
+	CAbundleB64             string `json:"kubernetes.io/secret/ca-bundle-crt,omitempty"`
+	ServiceIP               string `json:"service-ip,omitempty"`
 }
 
 // PathExists returns true if the specified path exists.
@@ -457,7 +464,38 @@ func (p *S3fsPlugin) mountInternal(mountRequest interfaces.FlexVolumeMountReques
 			}
 		}
 	}
+	if options.CAbundleB64 != "" && options.ServiceIP != "" {
+		CaBundleKey, err := parser.DecodeBase64(options.CAbundleB64)
+		//caFile := path.Join(mountPath, caFileName)
+		caFile := path.Join(caPath, caFileName)
+		err = writeFile(caFile, []byte(CaBundleKey), 0600)
+		if err != nil {
+			p.Logger.Error(podUID+":"+" Cannot create ca crt file",
+				zap.Error(err))
+			return fmt.Errorf("cannot create ca crt file: %v", err)
+		}
+		os.Setenv("CURL_CA_BUNDLE", caFile)
+		os.Setenv("AWS_CA_BUNDLE", caFile)
+		u, err := url.Parse(endptValue)
+		if err != nil {
+			p.Logger.Error(podUID+":"+" Unable to parse the endpoint URL",
+				zap.Error(err))
+			return fmt.Errorf("unable to parse the endpoint URL: %v", err)
+		}
+		hostname := u.Hostname()
+		addLine := options.ServiceIP + "     " + hostname + "\n"
+		f, err := os.OpenFile(etcHost, os.O_APPEND|os.O_WRONLY, 0600)
+		if err != nil {
+			p.Logger.Error(podUID+":"+" Cannot open etc host file",
+				zap.Error(err))
+			return fmt.Errorf("cannot open etc host file: %v", err)
+		}
 
+		defer f.Close()
+		if _, err = f.WriteString(addLine); err != nil {
+			panic(err)
+		}
+	}
 	// check that bucket exists before doing the mount
 	err = p.checkBucket(endptValue, regionValue, options.Bucket,
 		&backend.ObjectStorageCredentials{
@@ -529,7 +567,6 @@ func (p *S3fsPlugin) mountInternal(mountRequest interfaces.FlexVolumeMountReques
 			zap.Error(err))
 		return fmt.Errorf("cannot create password file: %v", err)
 	}
-
 	var tlsCipherSuite string
 	if options.TLSCipherSuite != "" {
 		tlsCipherSuite = options.TLSCipherSuite
