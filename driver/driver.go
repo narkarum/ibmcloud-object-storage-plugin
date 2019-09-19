@@ -36,6 +36,7 @@ const (
 	caFileName            = "cabundle.crt"
 	caPath                = "/tmp"
 	etcHost               = "/etc/hosts"
+	etcHostBak            = "/etc/hosts.bk"
 	// SecretAccessKey is the key name for the AWS Access Key
 	SecretAccessKey = "access-key"
 	// SecretSecretKey is the key name for the AWS Secret Key
@@ -483,7 +484,19 @@ func (p *S3fsPlugin) mountInternal(mountRequest interfaces.FlexVolumeMountReques
 			return fmt.Errorf("unable to parse the endpoint URL: %v", err)
 		}
 		hostname := u.Hostname()
-		addLine := options.ServiceIP + "     " + hostname + "\n"
+		output, err := command("cp", etcHost, etcHostBak).CombinedOutput()
+		if err != nil {
+			p.Logger.Error(podUID+":"+"Unable to create a copy of /etc/hosts file",
+				zap.Error(err))
+			return fmt.Errorf("Unable to create a copy of /etc/hosts file: %s", string(output))
+		}
+		cmd, err := command("grep", "-v", "-w", hostname, etcHostBak).Output()
+		if err != nil {
+			p.Logger.Error(podUID+":"+"Unable to check existing entries for service in /etc/hosts file",
+				zap.Error(err))
+			return fmt.Errorf("Unable to check existing entries for service in /etc/hosts file: %s", string(output))
+		}
+
 		f, err := os.OpenFile(etcHost, os.O_APPEND|os.O_WRONLY, 0600)
 		if err != nil {
 			p.Logger.Error(podUID+":"+" Cannot open etc host file",
@@ -492,8 +505,24 @@ func (p *S3fsPlugin) mountInternal(mountRequest interfaces.FlexVolumeMountReques
 		}
 
 		defer f.Close()
+
+		// empty the etc/hosts file
+		f.Truncate(0)
+		f.Seek(0, 0)
+
+		// write contents removing existing service entries
+		if _, err = f.WriteString(string(cmd)); err != nil {
+			p.Logger.Error(podUID+":"+" Cannot clean up etc/hosts file",
+				zap.Error(err))
+			return fmt.Errorf("cannot clean up /etc/hosts file: %v", err)
+		}
+
+		// add new entry for the current service
+		addLine := options.ServiceIP + "     " + hostname + "\n"
 		if _, err = f.WriteString(addLine); err != nil {
-			panic(err)
+			p.Logger.Error(podUID+":"+" Cannot add entry to etc host file",
+				zap.Error(err))
+			return fmt.Errorf("cannot add entry to /etc/hosts file: %v", err)
 		}
 	}
 	// check that bucket exists before doing the mount
