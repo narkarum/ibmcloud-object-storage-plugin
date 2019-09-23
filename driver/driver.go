@@ -32,10 +32,7 @@ const (
 	passwordFileName      = "passwd"
 	cacheDirectoryName    = "cache"
 	defaultTLSCipherSuite = "AES"
-	caFileName            = "cabundle.crt"
 	caPath                = "/tmp"
-	etcHost               = "/etc/hosts"
-	etcHostBak            = "/etc/hosts.bk"
 	// SecretAccessKey is the key name for the AWS Access Key
 	SecretAccessKey = "access-key"
 	// SecretSecretKey is the key name for the AWS Secret Key
@@ -467,6 +464,7 @@ func (p *S3fsPlugin) mountInternal(mountRequest interfaces.FlexVolumeMountReques
 	if options.CAbundleB64 != "" && options.ServiceIP != "" {
 		CaBundleKey, err := parser.DecodeBase64(options.CAbundleB64)
 		//caFile := path.Join(mountPath, caFileName)
+		caFileName := options.ServiceIP + "_ ca.crt"
 		caFile := path.Join(caPath, caFileName)
 		err = writeFile(caFile, []byte(CaBundleKey), 0600)
 		if err != nil {
