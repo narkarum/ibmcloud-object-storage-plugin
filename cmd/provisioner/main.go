@@ -146,7 +146,7 @@ func main() {
 		pc.Run(stopCh)
 	} else {
 		// Start watcher for persistent volumes
-		s3fsprovisioner.WatchPersistentVolumes(clientset, *logger)
+		s3fsprovisioner.WatchPersistentVolumes(clientset, s3fsProvisioner, *logger)
 	}
 }
 

@@ -57,6 +57,7 @@ type pvcAnnotations struct {
 	CosServiceName          string `json:"ibm.io/cos-service"`
 	CosServiceNamespace     string `json:"ibm.io/cos-service-ns,omitempty"`
 	AutoCache               bool   `json:"ibm.io/auto_cache,string,omitempty"`
+	AllowedIPs              string `json:"ibm.io/allowed_ips,omitempty"`
 }
 
 // Storage Class options
@@ -84,6 +85,8 @@ const (
 	autoBucketNamePrefix = "tmp-s3fs-"
 	fsType               = ""
 	caBundlePath         = "/tmp/"
+	// ResConfApiKeyB64 is used for retrieving IAM Access token(in case of HMAC Keys),  used for setting firewall rules
+	ResConfApiKeyB64 = "res-conf-apikey"
 )
 
 // IBMS3fsProvisioner is a dynamic provisioner of persistent volumes backed by Object Storage via s3fs
@@ -133,7 +136,7 @@ func (p *IBMS3fsProvisioner) writeCrtFile(secretName, secretNamespace, serviceNa
 	}
 	return nil
 }
-func (p *IBMS3fsProvisioner) getCredentials(secretName, secretNamespace string) (*backend.ObjectStorageCredentials, []string, error) {
+func (p *IBMS3fsProvisioner) getCredentials(secretName, secretNamespace string) (*backend.ObjectStorageCredentials, []string, string, error) {
 	secrets, err := p.Client.Core().Secrets(secretNamespace).Get(secretName, metav1.GetOptions{})
 	if err != nil {
 		return nil, nil, fmt.Errorf("cannot retrieve secret %s: %v", secretName, err)
@@ -166,12 +169,14 @@ func (p *IBMS3fsProvisioner) getCredentials(secretName, secretNamespace string) 
 		serviceInstanceID, err = parseSecret(secrets, driver.SecretServiceInstanceID)
 	}
 
+	resConfApiKey, _ := secrets.Data[ResConfApiKeyB64]
+
 	return &backend.ObjectStorageCredentials{
 		AccessKey:         accessKey,
 		SecretKey:         secretKey,
 		APIKey:            apiKey,
 		ServiceInstanceID: serviceInstanceID,
-	}, allowedNamespace, nil
+	}, allowedNamespace, string(resConfApiKey), nil
 
 }
 
@@ -182,7 +187,7 @@ func (p *IBMS3fsProvisioner) Provision(options controller.VolumeOptions) (*v1.Pe
 	var pvcName = options.PVC.Name
 	var pvcNamespace = options.PVC.Namespace
 	var clusterID = os.Getenv("CLUSTER_ID")
-	var msg, svcIp string
+	var msg, svcIp, resConfApiKey string
 	var valBucket = true
 	var allowedNamespace []string
 	var creds *backend.ObjectStorageCredentials
@@ -356,7 +361,7 @@ func (p *IBMS3fsProvisioner) Provision(options controller.VolumeOptions) (*v1.Pe
 
 	//var err_msg error
 	if valBucket {
-		creds, allowedNamespace, err = p.getCredentials(pvc.SecretName, pvc.SecretNamespace)
+		creds, allowedNamespace, resConfApiKey, err = p.getCredentials(pvc.SecretName, pvc.SecretNamespace)
 		if err != nil {
 			return nil, fmt.Errorf(pvcName+":"+clusterID+":cannot get credentials: %v", err)
 		}
@@ -495,6 +500,7 @@ func (p *IBMS3fsProvisioner) Provision(options controller.VolumeOptions) (*v1.Pe
 		CurlDebug:               pvc.CurlDebug,
 		DebugLevel:              pvc.DebugLevel,
 		CosServiceName:          pvc.CosServiceName,
+		AllowedIPs:              pvc.AllowedIPs,
 	})
 	if err != nil {
 		return nil, fmt.Errorf(pvcName+":"+clusterID+":cannot marshal pv options: %v", err)

@@ -23,16 +23,18 @@ import (
 )
 
 var lgr zap.Logger
+var provisioner *IBMS3fsProvisioner
 
 // WatchPersistentVolumes ...
-func WatchPersistentVolumes(client kubernetes.Interface, log zap.Logger) {
+func WatchPersistentVolumes(client kubernetes.Interface, s3fsProvisioner *IBMS3fsProvisioner, log zap.Logger) {
 	lgr = log
+	provisioner = s3fsProvisioner
 	watchlist := cache.NewListWatchFromClient(client.Core().RESTClient(), "persistentvolumes", apiv1.NamespaceAll, fields.Everything())
 	_, controller := cache.NewInformer(watchlist, &v1.PersistentVolume{}, time.Second*0,
 		cache.ResourceEventHandlerFuncs{
 			AddFunc:    ValidatePersistentVolume,
-			DeleteFunc: ValidatePersistentVolume,
-			UpdateFunc: nil,
+			DeleteFunc: nil,
+			UpdateFunc: ValidatePersistentVolume,
 		},
 	)
 	stopch := wait.NeverStop
@@ -41,6 +43,24 @@ func WatchPersistentVolumes(client kubernetes.Interface, log zap.Logger) {
 	<-stopch
 }
 
-func ValidatePersistentVolume(obj interface{}) {
-	lgr.Info("Validate of persistent volume is successful", zap.Reflect("persistentvolume", obj))
+func ValidatePersistentVolume(pvObj interface{}) {
+	lgr.Info("Updating persistent volume firewall rules", zap.Reflect("persistentvolume", pvObj))
+	creds, allowedNamespace, resConfApiKey, err = provisioner.getCredentials(pvc.SecretName, pvc.SecretNamespace)
+	if err != nil {
+		return nil, fmt.Errorf(pvcName+":"+clusterID+":cannot get credentials: %v", err)
+	}
+	pvAnnots = pvObj.ObjectMeta.Annotations
+	pvName = pvObj.Name
+	if pvAnnots.AllowedIPs != "" {
+		if creds.AccessKey != "" && resConfApiKey == "" {
+			return nil, fmt.Errorf(pvcName + ":" + clusterID + ":Firewall rules cannot be set without api key")
+		} else if creds.APIKey != "" {
+			resConfApiKey = creds.APIKey
+		}
+		err = UpdateFirewallRules(pvAnnots.AllowedIPs, resConfApiKey, pvAnnots.Bucket)
+		if err != nil {
+			return nil, fmt.Errorf(pvName+":"+"Setting firewall rules failed for bucket '%s': %v", pvAnnots.Bucket, err)
+		}
+	}
+	lgr.Info("Updation of persistent volume firewall rules completed successfully", zap.Reflect("persistentvolume", pvObj))
 }
