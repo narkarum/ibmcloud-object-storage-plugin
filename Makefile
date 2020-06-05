@@ -5,7 +5,7 @@
 # * US Government Users Restricted Rights - Use, duplication or
 # * disclosure restricted by GSA ADP Schedule Contract with IBM Corp.
 # ******************************************************************************
-
+GO111MODULE := on
 IMAGE = ibmcloud-object-storage-plugin
 
 VERSION :=
@@ -13,7 +13,6 @@ TAG := $(shell git describe --abbrev=0 --tags HEAD 2>/dev/null)
 COMMIT := $(shell git rev-parse HEAD)
 GOPACKAGES=$(shell go list ./... | grep -v /vendor/ | grep -v /cmd)
 GOFILES=$(shell find . -type f -name '*.go' -not -path "./vendor/*")
-
 GIT_COMMIT_SHA="$(shell git rev-parse HEAD 2>/dev/null)"
 GIT_REMOTE_URL="$(shell git config --get remote.origin.url 2>/dev/null)"
 BUILD_DATE="$(shell date -u +"%Y-%m-%dT%H:%M:%SZ")"
@@ -40,9 +39,10 @@ driver: deps builddriver
 
 .PHONY: deps
 deps:
-	echo "Installing dependencies ..."
-	glide install --strip-vendor
-	go get github.com/pierrre/gotestcover
+	go get -u -v all
+	@if ! which golangci-lint >/dev/null || [[ "$$(golangci-lint --version)" != *${LINT_VERSION}* ]]; then \
+		curl -sfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(shell go env GOPATH)/bin v${LINT_VERSION}; \
+	fi
 
 .PHONY: fmt
 fmt:
@@ -66,7 +66,7 @@ buildgo:
 	go build
 
 .PHONY: buildprovisioner
-buildprovisioner:
+buildprovisioner: deps
 	#Build provisioner executable on target env
 	docker build -t provisioner-builder --pull -f images/provisioner/Dockerfile.builder .
 	docker run provisioner-builder /bin/true
@@ -85,7 +85,7 @@ buildprovisioner:
 	rm -f ca-certs.tar.gz
 
 .PHONY: builddriver
-builddriver:
+builddriver: deps
 	#Build and copy executables
 	docker build --build-arg git_commit_id=${GIT_COMMIT_SHA} --build-arg build_date=${BUILD_DATE} -t driver-builder --pull -f images/driver/Dockerfile.builder .
 	docker run driver-builder /bin/true
